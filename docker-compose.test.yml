@@ -1,0 +1,11 @@
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      # Скачанные зависимости переживают пересборку образа
+      - maven-repository:/root/.m2
+
+volumes:
+  maven-repository:
