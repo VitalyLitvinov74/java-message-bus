@@ -47,18 +47,33 @@ public final class MessageBus {
         return this.pipeline.send(query);
     }
 
+    /** Публикует событие везде: местным обработчикам и в топик, если он размечен. */
+    public CompletionStage<Void> publish(DomainEvent event) {
+        return this.publish(event, Delivery.EveryWhere);
+    }
+
     /**
-     * Отдаёт событие местным обработчикам, затем публикует его в топик из {@link Publish}.
+     * Отдаёт событие местным обработчикам и публикует его в топик из {@link Publish} — в той мере,
+     * в какой это разрешает {@code delivery}.
      *
      * Топик находится до местных обработчиков: ошибка разметки бросается сразу, как и ошибка
      * местного обработчика, и в Kafka ничего не уходит. Отказ брокера приходит только через
-     * результат: он завершается, когда брокер подтвердил запись, или с ошибкой. Событие без
-     * {@link Publish} даёт уже завершённый результат.
+     * результат: он завершается, когда брокер подтвердил запись, или с ошибкой. Без отправки
+     * в топик результат уже завершён.
      */
-    public CompletionStage<Void> publish(DomainEvent event) {
-        Optional<EventTopic> topic = this.topics.computeIfAbsent(event.getClass(), this::topicOf);
+    public CompletionStage<Void> publish(DomainEvent event, Delivery delivery) {
+        Optional<EventTopic> topic = delivery.reachesNetwork()
+                ? this.topics.computeIfAbsent(event.getClass(), this::topicOf)
+                : Optional.empty();
+        if (delivery == Delivery.InNetwork && topic.isEmpty()) {
+            throw new IllegalStateException(
+                    "Событие " + event.getClass().getName() + " без @Publish нельзя отправить только в сеть"
+            );
+        }
 
-        this.pipeline.send(event);
+        if (delivery.reachesMemory()) {
+            this.pipeline.send(event);
+        }
 
         return topic
                 .map(value -> value.publish(event))

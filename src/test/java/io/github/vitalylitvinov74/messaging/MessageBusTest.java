@@ -270,6 +270,88 @@ class MessageBusTest {
         assertThat(this.kafkaTemplate.sent()).isEmpty();
     }
 
+    /** Размеченное событие остаётся в процессе, когда публикующий просит только память. */
+    @Test
+    void publishInMemoryKeepsMarkedEventInsideProcess() {
+        MessageBus bus = this.bus(this.received);
+        KlineWasReceivedEvent event = new KlineWasReceivedEvent("BTCUSDT", 1);
+
+        CompletionStage<Void> publication = bus.publish(event, Delivery.InMemory);
+
+        assertThat(publication.toCompletableFuture()).isCompleted();
+        assertThat(this.received.received()).containsExactly(event);
+        assertThat(this.kafkaTemplate.sent()).isEmpty();
+    }
+
+    /** Разметка топика в памяти не нужна, поэтому её ошибка не мешает местной доставке. */
+    @Test
+    void publishInMemoryDoesNotResolveTopic() {
+        MessageBus bus = this.bus(this.received);
+        UnresolvedTopicEvent event = new UnresolvedTopicEvent("BTCUSDT");
+
+        bus.publish(event, Delivery.InMemory);
+
+        assertThat(this.received.received()).containsExactly(event);
+        assertThat(this.kafkaTemplate.sent()).isEmpty();
+    }
+
+    /** Горячий поток фактов идёт в топик мимо местных обработчиков. */
+    @Test
+    void publishInNetworkSendsMarkedEventWithoutLocalHandlers() {
+        MessageBus bus = this.bus(this.received);
+        KlineWasReceivedEvent event = new KlineWasReceivedEvent("BTCUSDT", 1);
+
+        CompletionStage<Void> publication = bus.publish(event, Delivery.InNetwork);
+
+        assertThat(publication.toCompletableFuture()).isCompleted();
+        assertThat(this.received.received()).isEmpty();
+        assertThat(this.kafkaTemplate.sent()).containsExactly(
+                new StubKafkaTemplate.Sent("market.klines.100ms", "BTCUSDT", event)
+        );
+    }
+
+    /** Событие без топика нельзя отправить только в сеть: тихий пропуск потерял бы факт. */
+    @Test
+    void publishInNetworkFailsForUnmarkedEvent() {
+        MessageBus bus = this.bus(this.received);
+
+        assertThatThrownBy(() -> bus.publish(new SettingsWereUpdatedEvent("node-1", 7), Delivery.InNetwork))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(SettingsWereUpdatedEvent.class.getName())
+                .hasMessageContaining("@Publish");
+
+        assertThat(this.received.received()).isEmpty();
+        assertThat(this.kafkaTemplate.sent()).isEmpty();
+    }
+
+    /** Отказ брокера при доставке только в сеть приходит тем же путём, что и при доставке везде. */
+    @Test
+    void publishInNetworkCompletesExceptionallyWhenBrokerRejects() {
+        this.kafkaTemplate.rejectSends(new IllegalStateException("брокер не подтвердил запись"));
+        MessageBus bus = this.bus();
+
+        CompletionStage<Void> publication = bus.publish(new KlineWasReceivedEvent("BTCUSDT", 1), Delivery.InNetwork);
+
+        assertThat(publication.toCompletableFuture())
+                .failsWithin(WAIT)
+                .withThrowableOfType(ExecutionException.class)
+                .withMessageContaining("брокер не подтвердил запись");
+    }
+
+    /** Явная доставка везде ведёт себя так же, как публикация без параметра. */
+    @Test
+    void publishEveryWhereDeliversToLocalHandlersAndTopic() {
+        MessageBus bus = this.bus(this.received);
+        KlineWasReceivedEvent event = new KlineWasReceivedEvent("BTCUSDT", 1);
+
+        bus.publish(event, Delivery.EveryWhere);
+
+        assertThat(this.received.received()).containsExactly(event);
+        assertThat(this.kafkaTemplate.sent()).containsExactly(
+                new StubKafkaTemplate.Sent("market.klines.100ms", "BTCUSDT", event)
+        );
+    }
+
     /** Собирает шину так же, как автоматическая настройка: обработчики раскладываются по видам. */
     @SuppressWarnings("rawtypes")
     private MessageBus bus(Object... handlers) {
