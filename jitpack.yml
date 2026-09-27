@@ -1,0 +1,4 @@
+# JitPack собирает библиотеку на Java 21: без этого он взял бы старую JDK по умолчанию
+before_install:
+  - sdk install java 21-open
+  - sdk use java 21-open
