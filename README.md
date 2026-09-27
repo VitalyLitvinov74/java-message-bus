@@ -2,12 +2,7 @@
 
 Шина сообщений для сервисов на `Spring Boot`. Команды и запросы выполняются внутри сервиса через `PipelinR`. События получают обработчики внутри сервиса, а размеченные события ещё и уходят в Kafka.
 
-Модули:
-
-| Модуль | Что внутри | Кто подключает |
-| --- | --- | --- |
-| `messaging-api` | `MessageBus`, `Query`, `DomainEvent`, `@Publish`, `@PartitionKey` | код сообщений и обработчиков |
-| `messaging-spring-kafka` | реализация шины и автоматическая настройка `Spring Boot` | сборка приложения |
+Библиотека — один модуль: класс `MessageBus`, типы `Query` и `DomainEvent`, аннотации `@Publish` и `@PartitionKey` и автоматическая настройка `Spring Boot`.
 
 ## Подключение
 
@@ -22,12 +17,14 @@ mvn install
 ```xml
 <dependency>
     <groupId>io.github.vitalylitvinov74</groupId>
-    <artifactId>messaging-spring-kafka</artifactId>
+    <artifactId>java-message-bus</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
-Нужны `Java 21` и `Spring Boot 4.1`. Бин `MessageBus` появится сам. Если в сервисе уже есть свой `Pipeline` или `MessageBus`, библиотека возьмёт их и второй не создаст.
+Нужны `Java 21` и `Spring Boot 4.1`. Вместе с библиотекой в сервис придёт `spring-boot-starter-kafka`.
+
+Бин `MessageBus` появится сам. Если в сервисе уже есть свой `Pipeline` или `MessageBus`, библиотека возьмёт их и второй не создаст.
 
 ## Команды и запросы
 
@@ -59,6 +56,7 @@ bus.publish(new KlineWasReceivedEvent("BTCUSDT", 64000.5));
 
 - `topic` — имя топика или ссылка на настройку в `${...}`.
 - `@PartitionKey` — ключ партиции (раздела топика). События с одним ключом читаются в порядке отправки. Ставится на компонент записи или на метод без параметров, который возвращает `String`.
+- Если метод ключа вернул `null`, событие уходит без ключа, и порядок для него не гарантирован.
 - Тело события сериализует настройка сервиса `spring.kafka.producer.value-serializer`.
 
 ## Приём из Kafka
